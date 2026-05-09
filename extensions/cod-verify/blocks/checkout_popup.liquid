@@ -1,0 +1,124 @@
+<div id="cod-verify-modal" style="display: none; position: fixed; z-index: 999999; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;">
+  <div style="background-color: #fefefe; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+    <span id="cod-verify-close" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+    <h2 style="margin-top: 0;">Enter Mobile Number</h2>
+    <p>Please provide your mobile number to proceed to checkout.</p>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <input type="tel" id="cod-verify-mobile" placeholder="Mobile Number" style="padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px;" required>
+      <button id="cod-verify-submit" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer;">Submit & Checkout</button>
+      <p id="cod-verify-error" style="color: red; display: none; font-size: 14px; margin: 0;">Please enter a valid mobile number.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    const modal = document.getElementById("cod-verify-modal");
+    const closeBtn = document.getElementById("cod-verify-close");
+    const submitBtn = document.getElementById("cod-verify-submit");
+    const mobileInput = document.getElementById("cod-verify-mobile");
+    const errorText = document.getElementById("cod-verify-error");
+    
+    // Initially hide modal
+    modal.style.display = "none";
+
+    let checkoutTarget = null;
+    let checkoutForm = null;
+
+    // Use capture phase to intercept click before theme scripts trigger AJAX or navigation
+    document.body.addEventListener("click", function(e) {
+      const checkoutBtn = e.target.closest('[name="checkout"], [href="/checkout"], .checkout-button, #checkout');
+      
+      if (checkoutBtn && !modal.dataset.verified) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        
+        checkoutTarget = checkoutBtn;
+        checkoutForm = checkoutBtn.closest('form');
+        
+        modal.style.display = "flex";
+      }
+    }, true);
+
+    // Also intercept form submits just in case
+    document.body.addEventListener("submit", function(e) {
+      const form = e.target.closest('form[action="/cart"], form[action^="/checkout"]');
+      if (form && !modal.dataset.verified) {
+        // If it's a cart form, intercept it
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        
+        checkoutForm = form;
+        modal.style.display = "flex";
+      }
+    }, true);
+
+    closeBtn.onclick = function() {
+      modal.style.display = "none";
+    }
+
+    window.onclick = function(event) {
+      if (event.target == modal) {
+        modal.style.display = "none";
+      }
+    }
+
+    submitBtn.onclick = function() {
+      const mobileNumber = mobileInput.value.trim();
+      
+      if (!mobileNumber) {
+        errorText.style.display = "block";
+        return;
+      }
+      
+      errorText.style.display = "none";
+      submitBtn.textContent = "Loading...";
+      submitBtn.disabled = true;
+
+      // Send to backend via App Proxy
+      fetch('/apps/cod-verify/mobile-number', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mobile: mobileNumber })
+      })
+      .then(response => {
+        proceedToCheckout();
+      })
+      .catch(error => {
+        console.error('Error submitting mobile number:', error);
+        proceedToCheckout();
+      });
+    }
+
+    function proceedToCheckout() {
+      modal.style.display = "none";
+      modal.dataset.verified = "true";
+      
+      if (checkoutForm) {
+        // To properly trigger Shopify checkout, we need the checkout button name
+        const hiddenInput = document.createElement("input");
+        hiddenInput.type = "hidden";
+        hiddenInput.name = "checkout";
+        hiddenInput.value = "Checkout";
+        checkoutForm.appendChild(hiddenInput);
+        checkoutForm.submit();
+      } else if (checkoutTarget && checkoutTarget.href) {
+        window.location.href = checkoutTarget.href;
+      } else {
+        window.location.href = "/checkout";
+      }
+    }
+  });
+
+  console.log("Checkout Mobile Popup",window);
+</script>
+
+{% schema %}
+{
+  "name": "Checkout Mobile Popup",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}
