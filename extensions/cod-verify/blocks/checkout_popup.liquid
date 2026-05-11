@@ -1,13 +1,29 @@
 <div id="cod-verify-modal" style="display: none; position: fixed; z-index: 999999; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;">
-  <div style="background-color: #fefefe; padding: 20px; border: 1px solid #888; width: 80%; max-width: 400px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-    <span id="cod-verify-close" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
-    <h2 style="margin-top: 0;">Enter Mobile Number</h2>
-    <p>Please provide your mobile number to proceed to checkout.</p>
-    <div style="display: flex; flex-direction: column; gap: 10px;">
-      <input type="tel" id="cod-verify-mobile" placeholder="Mobile Number" style="padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px;" required>
-      <button id="cod-verify-submit" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer;">Submit & Checkout</button>
-      <p id="cod-verify-error" style="color: red; display: none; font-size: 14px; margin: 0;">Please enter a valid mobile number.</p>
+  <div style="background-color: #fefefe; padding: 24px; border: 1px solid #888; width: 90%; max-width: 400px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-family: sans-serif;">
+    <span id="cod-verify-close" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+    <h2 style="margin-top: 0; margin-bottom: 8px; font-size: 20px; font-weight: 600;">Verify Mobile Number</h2>
+    
+    <!-- STEP 1: MOBILE INPUT -->
+    <div id="cod-step-1" style="display: block;">
+      <p style="font-size: 14px; color: #555; margin-bottom: 16px;">Please provide your mobile number (with country code) to receive an OTP.</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <input type="tel" id="cod-verify-mobile" placeholder="e.g. 919876543210" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 100%; box-sizing: border-box;" required>
+        <button id="cod-send-otp-btn" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; width: 100%; font-weight: 500;">Send OTP</button>
+        <p id="cod-error-1" style="color: #d9534f; display: none; font-size: 14px; margin: 0;"></p>
+      </div>
     </div>
+
+    <!-- STEP 2: OTP INPUT -->
+    <div id="cod-step-2" style="display: none;">
+      <p style="font-size: 14px; color: #555; margin-bottom: 16px;">Enter the OTP sent to <strong id="cod-display-mobile"></strong>.</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <input type="text" id="cod-verify-otp" placeholder="Enter OTP" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 100%; box-sizing: border-box; text-align: center; letter-spacing: 2px;" required>
+        <button id="cod-verify-otp-btn" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; width: 100%; font-weight: 500;">Verify & Checkout</button>
+        <p id="cod-error-2" style="color: #d9534f; display: none; font-size: 14px; margin: 0;"></p>
+        <button id="cod-change-number" style="background: none; border: none; color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 14px; padding: 0;">Change Mobile Number</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -15,17 +31,27 @@
   document.addEventListener("DOMContentLoaded", function() {
     const modal = document.getElementById("cod-verify-modal");
     const closeBtn = document.getElementById("cod-verify-close");
-    const submitBtn = document.getElementById("cod-verify-submit");
-    const mobileInput = document.getElementById("cod-verify-mobile");
-    const errorText = document.getElementById("cod-verify-error");
     
-    // Initially hide modal
-    modal.style.display = "none";
+    // Step 1 Elements
+    const step1 = document.getElementById("cod-step-1");
+    const mobileInput = document.getElementById("cod-verify-mobile");
+    const sendOtpBtn = document.getElementById("cod-send-otp-btn");
+    const error1 = document.getElementById("cod-error-1");
 
+    // Step 2 Elements
+    const step2 = document.getElementById("cod-step-2");
+    const otpInput = document.getElementById("cod-verify-otp");
+    const verifyOtpBtn = document.getElementById("cod-verify-otp-btn");
+    const error2 = document.getElementById("cod-error-2");
+    const displayMobile = document.getElementById("cod-display-mobile");
+    const changeNumberBtn = document.getElementById("cod-change-number");
+
+    // State
+    modal.style.display = "none";
     let checkoutTarget = null;
     let checkoutForm = null;
 
-    // Use capture phase to intercept click before theme scripts trigger AJAX or navigation
+    // Helper: Intercept checkout clicks
     document.body.addEventListener("click", function(e) {
       const checkoutBtn = e.target.closest('[name="checkout"], [href="/checkout"], .checkout-button, #checkout');
       
@@ -36,15 +62,22 @@
         checkoutTarget = checkoutBtn;
         checkoutForm = checkoutBtn.closest('form');
         
+        // Reset UI
+        step1.style.display = "block";
+        step2.style.display = "none";
+        error1.style.display = "none";
+        error2.style.display = "none";
+        mobileInput.value = "";
+        otpInput.value = "";
+        
         modal.style.display = "flex";
       }
     }, true);
 
-    // Also intercept form submits just in case
+    // Helper: Intercept form submits
     document.body.addEventListener("submit", function(e) {
       const form = e.target.closest('form[action="/cart"], form[action^="/checkout"]');
       if (form && !modal.dataset.verified) {
-        // If it's a cart form, intercept it
         e.preventDefault();
         e.stopImmediatePropagation();
         
@@ -53,42 +86,117 @@
       }
     }, true);
 
+    // Close Modal
     closeBtn.onclick = function() {
       modal.style.display = "none";
     }
-
     window.onclick = function(event) {
       if (event.target == modal) {
         modal.style.display = "none";
       }
     }
 
-    submitBtn.onclick = function() {
+    // Change Number action
+    changeNumberBtn.onclick = function() {
+      step2.style.display = "none";
+      step1.style.display = "block";
+      error2.style.display = "none";
+      otpInput.value = "";
+    }
+
+    // Step 1: Send OTP
+    sendOtpBtn.onclick = function() {
       const mobileNumber = mobileInput.value.trim();
-      
       if (!mobileNumber) {
-        errorText.style.display = "block";
+        error1.textContent = "Please enter a valid mobile number.";
+        error1.style.display = "block";
         return;
       }
       
-      errorText.style.display = "none";
-      submitBtn.textContent = "Loading...";
-      submitBtn.disabled = true;
+      error1.style.display = "none";
+      const originalText = sendOtpBtn.textContent;
+      sendOtpBtn.textContent = "Sending OTP...";
+      sendOtpBtn.disabled = true;
 
-      // Send to backend via App Proxy
-      fetch('/apps/cod-verify/mobile-number', {
+      console.log("[cod-verify] Sending OTP request for mobile:", mobileNumber);
+      
+      fetch('/apps/cod-verify/otp', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ mobile: mobileNumber })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionType: 'send', mobile: mobileNumber })
       })
-      .then(response => {
-        proceedToCheckout();
+      .then(res => {
+        console.log("[cod-verify] Send OTP HTTP Status:", res.status);
+        return res.json();
+      })
+      .then(data => {
+        console.log("[cod-verify] Send OTP Response Data:", data);
+        sendOtpBtn.textContent = originalText;
+        sendOtpBtn.disabled = false;
+
+        if (data.success) {
+          displayMobile.textContent = mobileNumber;
+          step1.style.display = "none";
+          step2.style.display = "block";
+        } else {
+          error1.textContent = data.error || "Failed to send OTP.";
+          error1.style.display = "block";
+        }
       })
       .catch(error => {
-        console.error('Error submitting mobile number:', error);
-        proceedToCheckout();
+        console.error('Error sending OTP:', error);
+        sendOtpBtn.textContent = originalText;
+        sendOtpBtn.disabled = false;
+        error1.textContent = "An error occurred while sending OTP.";
+        error1.style.display = "block";
+      });
+    }
+
+    // Step 2: Verify OTP
+    verifyOtpBtn.onclick = function() {
+      const mobileNumber = mobileInput.value.trim();
+      const otpValue = otpInput.value.trim();
+      
+      if (!otpValue) {
+        error2.textContent = "Please enter the OTP.";
+        error2.style.display = "block";
+        return;
+      }
+      
+      error2.style.display = "none";
+      const originalText = verifyOtpBtn.textContent;
+      verifyOtpBtn.textContent = "Verifying...";
+      verifyOtpBtn.disabled = true;
+
+      console.log("[cod-verify] Verifying OTP for mobile:", mobileNumber, "OTP:", otpValue);
+
+      fetch('/apps/cod-verify/otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionType: 'verify', mobile: mobileNumber, otp: otpValue })
+      })
+      .then(res => {
+        console.log("[cod-verify] Verify OTP HTTP Status:", res.status);
+        return res.json();
+      })
+      .then(data => {
+        console.log("[cod-verify] Verify OTP Response Data:", data);
+        verifyOtpBtn.textContent = originalText;
+        verifyOtpBtn.disabled = false;
+
+        if (data.success) { 
+           proceedToCheckout();
+        } else {
+           error2.textContent = data.error || "Invalid OTP.";
+           error2.style.display = "block";
+        }
+      })
+      .catch(error => {
+        console.error('Error verifying OTP:', error);
+        verifyOtpBtn.textContent = originalText;
+        verifyOtpBtn.disabled = false;
+        error2.textContent = "An error occurred while verifying OTP.";
+        error2.style.display = "block";
       });
     }
 
@@ -97,7 +205,6 @@
       modal.dataset.verified = "true";
       
       if (checkoutForm) {
-        // To properly trigger Shopify checkout, we need the checkout button name
         const hiddenInput = document.createElement("input");
         hiddenInput.type = "hidden";
         hiddenInput.name = "checkout";
@@ -111,8 +218,6 @@
       }
     }
   });
-
-  console.log("Checkout Mobile Popup",window);
 </script>
 
 {% schema %}

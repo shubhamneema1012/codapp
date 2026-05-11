@@ -5,6 +5,11 @@ name = "Codapp"
 application_url = "https://example.com"
 embedded = true
 
+[app_proxy]
+url = "https://example.com/api/proxy"
+subpath = "cod-verify"
+prefix = "apps"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "write_metaobject_definitions,write_metaobjects,write_products"
@@ -17,3 +22,6 @@ api_version = "2026-07"
 
 [build]
 automatically_update_urls_on_dev = true
+
+[access.admin]
+embedded_app_direct_api_access = true
