@@ -7,7 +7,8 @@
     <div id="cod-step-1" style="display: block;">
       <p style="font-size: 14px; color: #555; margin-bottom: 16px;">Please provide your mobile number (with country code) to receive an OTP.</p>
       <div style="display: flex; flex-direction: column; gap: 12px;">
-        <input type="tel" id="cod-verify-mobile" placeholder="e.g. 919876543210" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 100%; box-sizing: border-box;" required>
+        <input type="tel" id="cod-verify-mobile" placeholder="e.g. +919876543210" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 100%; box-sizing: border-box;" required>
+        <div id="recaptcha-container"></div>
         <button id="cod-send-otp-btn" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; width: 100%; font-weight: 500;">Send OTP</button>
         <p id="cod-error-1" style="color: #d9534f; display: none; font-size: 14px; margin: 0;"></p>
       </div>
@@ -27,18 +28,20 @@
   </div>
 </div>
 
+<!-- Firebase SDK (Compat Version - Best for Shopify Liquid Drop-ins) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
 <script>
   document.addEventListener("DOMContentLoaded", function() {
     const modal = document.getElementById("cod-verify-modal");
     const closeBtn = document.getElementById("cod-verify-close");
     
-    // Step 1 Elements
     const step1 = document.getElementById("cod-step-1");
     const mobileInput = document.getElementById("cod-verify-mobile");
     const sendOtpBtn = document.getElementById("cod-send-otp-btn");
     const error1 = document.getElementById("cod-error-1");
 
-    // Step 2 Elements
     const step2 = document.getElementById("cod-step-2");
     const otpInput = document.getElementById("cod-verify-otp");
     const verifyOtpBtn = document.getElementById("cod-verify-otp-btn");
@@ -46,12 +49,52 @@
     const displayMobile = document.getElementById("cod-display-mobile");
     const changeNumberBtn = document.getElementById("cod-change-number");
 
-    // State
+    // AAPKI EXACT FIREBASE CONFIGURATION
+    const firebaseConfig = {
+      apiKey: "AIzaSyA7jRnNzlwgIufCyjelepjaUnp6QdRq-SE",
+      authDomain: "codotp.firebaseapp.com",
+      projectId: "codotp",
+      storageBucket: "codotp.firebasestorage.app",
+      messagingSenderId: "998246370499",
+      appId: "1:998246370499:web:ae4940564263a07f8a2676",
+      measurementId: "G-71CYL0NJHN"
+    };
+
+    // Initialize Firebase
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    
+    const auth = firebase.auth();
+
+    // State variables
     modal.style.display = "none";
     let checkoutTarget = null;
     let checkoutForm = null;
+    let confirmationResult = null; 
 
-    // Helper: Intercept checkout clicks
+    // Set up reCAPTCHA verifier
+    let recaptchaVerifier = null;
+    function initRecaptcha() {
+      if (!recaptchaVerifier) {
+        recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
+          'size': 'normal',
+          'callback': (response) => {
+            console.log("reCAPTCHA solved");
+          },
+          'expired-callback': () => {
+            console.log("reCAPTCHA expired");
+            error1.textContent = "reCAPTCHA expired. Please try again.";
+            error1.style.display = "block";
+          }
+        });
+        recaptchaVerifier.render().then((widgetId) => {
+          window.recaptchaWidgetId = widgetId;
+        });
+      }
+    }
+
+    // Intercept checkout clicks
     document.body.addEventListener("click", function(e) {
       const checkoutBtn = e.target.closest('[name="checkout"], [href="/checkout"], .checkout-button, #checkout');
       
@@ -62,7 +105,6 @@
         checkoutTarget = checkoutBtn;
         checkoutForm = checkoutBtn.closest('form');
         
-        // Reset UI
         step1.style.display = "block";
         step2.style.display = "none";
         error1.style.display = "none";
@@ -71,10 +113,11 @@
         otpInput.value = "";
         
         modal.style.display = "flex";
+        initRecaptcha();
       }
     }, true);
 
-    // Helper: Intercept form submits
+    // Intercept form submits
     document.body.addEventListener("submit", function(e) {
       const form = e.target.closest('form[action="/cart"], form[action^="/checkout"]');
       if (form && !modal.dataset.verified) {
@@ -83,6 +126,7 @@
         
         checkoutForm = form;
         modal.style.display = "flex";
+        initRecaptcha();
       }
     }, true);
 
@@ -102,15 +146,25 @@
       step1.style.display = "block";
       error2.style.display = "none";
       otpInput.value = "";
+      
+      if (window.recaptchaWidgetId !== undefined && recaptchaVerifier) {
+         grecaptcha.reset(window.recaptchaWidgetId);
+      }
     }
 
-    // Step 1: Send OTP
+    // Send OTP Logic
     sendOtpBtn.onclick = function() {
-      const mobileNumber = mobileInput.value.trim();
+      let mobileNumber = mobileInput.value.trim();
+      
       if (!mobileNumber) {
         error1.textContent = "Please enter a valid mobile number.";
         error1.style.display = "block";
         return;
+      }
+      if (!mobileNumber.startsWith('+')) {
+         error1.textContent = "Please include your country code (e.g. +919876543210).";
+         error1.style.display = "block";
+         return;
       }
       
       error1.style.display = "none";
@@ -118,43 +172,39 @@
       sendOtpBtn.textContent = "Sending OTP...";
       sendOtpBtn.disabled = true;
 
-      console.log("[cod-verify] Sending OTP request for mobile:", mobileNumber);
-      
-      fetch('/apps/cod-verify/otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionType: 'send', mobile: mobileNumber })
-      })
-      .then(res => {
-        console.log("[cod-verify] Send OTP HTTP Status:", res.status);
-        return res.json();
-      })
-      .then(data => {
-        console.log("[cod-verify] Send OTP Response Data:", data);
-        sendOtpBtn.textContent = originalText;
-        sendOtpBtn.disabled = false;
-
-        if (data.success) {
+      auth.signInWithPhoneNumber(mobileNumber, recaptchaVerifier)
+        .then((result) => {
+          confirmationResult = result;
+          sendOtpBtn.textContent = originalText;
+          sendOtpBtn.disabled = false;
+          
           displayMobile.textContent = mobileNumber;
           step1.style.display = "none";
           step2.style.display = "block";
-        } else {
-          error1.textContent = data.error || "Failed to send OTP.";
+        })
+        .catch((error) => {
+          console.error('[cod-verify] Error sending OTP:', error);
+          sendOtpBtn.textContent = originalText;
+          sendOtpBtn.disabled = false;
+          
+          let errorMsg = "An error occurred while sending OTP.";
+          if (error.code === 'auth/invalid-phone-number') {
+             errorMsg = "Invalid phone number format. Please include country code (+91).";
+          } else if (error.message) {
+             errorMsg = error.message;
+          }
+          
+          error1.textContent = errorMsg;
           error1.style.display = "block";
-        }
-      })
-      .catch(error => {
-        console.error('Error sending OTP:', error);
-        sendOtpBtn.textContent = originalText;
-        sendOtpBtn.disabled = false;
-        error1.textContent = "An error occurred while sending OTP.";
-        error1.style.display = "block";
-      });
+          
+          if (window.recaptchaWidgetId !== undefined && recaptchaVerifier) {
+             grecaptcha.reset(window.recaptchaWidgetId);
+          }
+        });
     }
 
-    // Step 2: Verify OTP
+    // Verify OTP Logic
     verifyOtpBtn.onclick = function() {
-      const mobileNumber = mobileInput.value.trim();
       const otpValue = otpInput.value.trim();
       
       if (!otpValue) {
@@ -162,42 +212,38 @@
         error2.style.display = "block";
         return;
       }
-      
+      if (!confirmationResult) {
+        error2.textContent = "Session expired. Please request a new OTP.";
+        error2.style.display = "block";
+        return;
+      }
+
       error2.style.display = "none";
       const originalText = verifyOtpBtn.textContent;
       verifyOtpBtn.textContent = "Verifying...";
       verifyOtpBtn.disabled = true;
 
-      console.log("[cod-verify] Verifying OTP for mobile:", mobileNumber, "OTP:", otpValue);
-
-      fetch('/apps/cod-verify/otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionType: 'verify', mobile: mobileNumber, otp: otpValue })
-      })
-      .then(res => {
-        console.log("[cod-verify] Verify OTP HTTP Status:", res.status);
-        return res.json();
-      })
-      .then(data => {
-        console.log("[cod-verify] Verify OTP Response Data:", data);
-        verifyOtpBtn.textContent = originalText;
-        verifyOtpBtn.disabled = false;
-
-        if (data.success) { 
-           proceedToCheckout();
-        } else {
-           error2.textContent = data.error || "Invalid OTP.";
-           error2.style.display = "block";
-        }
-      })
-      .catch(error => {
-        console.error('Error verifying OTP:', error);
-        verifyOtpBtn.textContent = originalText;
-        verifyOtpBtn.disabled = false;
-        error2.textContent = "An error occurred while verifying OTP.";
-        error2.style.display = "block";
-      });
+      confirmationResult.confirm(otpValue)
+        .then((result) => {
+          verifyOtpBtn.textContent = originalText;
+          verifyOtpBtn.disabled = false;
+          proceedToCheckout();
+        })
+        .catch((error) => {
+          console.error('[cod-verify] Error verifying OTP:', error);
+          verifyOtpBtn.textContent = originalText;
+          verifyOtpBtn.disabled = false;
+          
+          let errorMsg = "Invalid OTP.";
+          if (error.code === 'auth/invalid-verification-code') {
+             errorMsg = "The OTP you entered is incorrect.";
+          } else if (error.message) {
+             errorMsg = error.message;
+          }
+          
+          error2.textContent = errorMsg;
+          error2.style.display = "block";
+        });
     }
 
     function proceedToCheckout() {
