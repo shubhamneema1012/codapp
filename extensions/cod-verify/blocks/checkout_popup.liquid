@@ -3,8 +3,17 @@
     <span id="cod-verify-close" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
     <h2 style="margin-top: 0; margin-bottom: 8px; font-size: 20px; font-weight: 600;">Verify Mobile Number</h2>
     
+    <!-- STEP 0: PAYMENT SELECTION -->
+    <div id="cod-step-0" style="display: block;">
+      <p style="font-size: 15px; color: #555; margin-bottom: 16px; text-align: center;">How would you like to pay for your order?</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <button id="cod-select-cod-btn" style="padding: 12px; background-color: #000; color: #fff; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; width: 100%; font-weight: 500;">Cash on Delivery (COD)</button>
+        <button id="cod-select-other-btn" style="padding: 12px; background-color: #fff; color: #000; border: 1px solid #000; border-radius: 4px; font-size: 16px; cursor: pointer; width: 100%; font-weight: 500;">Prepaid / Online Payment</button>
+      </div>
+    </div>
+
     <!-- STEP 1: MOBILE INPUT -->
-    <div id="cod-step-1" style="display: block;">
+    <div id="cod-step-1" style="display: none;">
       <p style="font-size: 14px; color: #555; margin-bottom: 16px;">Please provide your mobile number (with country code) to receive an OTP.</p>
       <div style="display: flex; flex-direction: column; gap: 12px;">
         <input type="tel" id="cod-verify-mobile" placeholder="e.g. +919876543210" style="padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; width: 100%; box-sizing: border-box;" required>
@@ -37,6 +46,10 @@
     const modal = document.getElementById("cod-verify-modal");
     const closeBtn = document.getElementById("cod-verify-close");
     
+    const step0 = document.getElementById("cod-step-0");
+    const selectCodBtn = document.getElementById("cod-select-cod-btn");
+    const selectOtherBtn = document.getElementById("cod-select-other-btn");
+
     const step1 = document.getElementById("cod-step-1");
     const mobileInput = document.getElementById("cod-verify-mobile");
     const sendOtpBtn = document.getElementById("cod-send-otp-btn");
@@ -105,7 +118,8 @@
         checkoutTarget = checkoutBtn;
         checkoutForm = checkoutBtn.closest('form');
         
-        step1.style.display = "block";
+        step0.style.display = "block";
+        step1.style.display = "none";
         step2.style.display = "none";
         error1.style.display = "none";
         error2.style.display = "none";
@@ -113,7 +127,6 @@
         otpInput.value = "";
         
         modal.style.display = "flex";
-        initRecaptcha();
       }
     }, true);
 
@@ -125,10 +138,33 @@
         e.stopImmediatePropagation();
         
         checkoutForm = form;
+        
+        step0.style.display = "block";
+        step1.style.display = "none";
+        step2.style.display = "none";
+        error1.style.display = "none";
+        error2.style.display = "none";
+        mobileInput.value = "";
+        otpInput.value = "";
+
         modal.style.display = "flex";
-        initRecaptcha();
       }
     }, true);
+
+    // Payment Selection Logic
+    selectCodBtn.onclick = function() {
+      step0.style.display = "none";
+      step1.style.display = "block";
+      initRecaptcha();
+    };
+
+    selectOtherBtn.onclick = function() {
+      // Bypass OTP for Prepaid/Other
+      const originalText = selectOtherBtn.textContent;
+      selectOtherBtn.textContent = "Processing...";
+      selectOtherBtn.disabled = true;
+      proceedToCheckout(false);
+    };
 
     // Close Modal
     closeBtn.onclick = function() {
@@ -225,9 +261,8 @@
 
       confirmationResult.confirm(otpValue)
         .then((result) => {
-          verifyOtpBtn.textContent = originalText;
-          verifyOtpBtn.disabled = false;
-          proceedToCheckout();
+          verifyOtpBtn.textContent = "Redirecting...";
+          proceedToCheckout(true);
         })
         .catch((error) => {
           console.error('[cod-verify] Error verifying OTP:', error);
@@ -246,7 +281,26 @@
         });
     }
 
-    function proceedToCheckout() {
+    function proceedToCheckout(isCodVerified) {
+      if (isCodVerified) {
+        fetch(window.Shopify && window.Shopify.routes && window.Shopify.routes.root ? window.Shopify.routes.root + 'cart/update.js' : '/cart/update.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attributes: { 'Verified COD': 'Yes' } })
+        })
+        .then(() => {
+          executeCheckout();
+        })
+        .catch((err) => {
+          console.error("Cart update failed", err);
+          executeCheckout();
+        });
+      } else {
+        executeCheckout();
+      }
+    }
+
+    function executeCheckout() {
       modal.style.display = "none";
       modal.dataset.verified = "true";
       
