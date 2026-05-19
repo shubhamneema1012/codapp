@@ -113,8 +113,7 @@ export default function Index() {
           </s-button>
         </s-banner>
       )}
-      
-      <s-grid gap="base" gridTemplateColumns="1fr 1fr 1fr 1fr" style={{ marginTop: "24px" }}>
+      <s-grid gap="base" gridTemplateColumns="1fr 1fr 1fr" style={{ marginTop: "24px" }}>
         <s-section heading="Total Popup Views">
           <span style={{ fontSize: "24px", fontWeight: "bold" }}>{analytics.total_orders}</span>
         </s-section>
@@ -123,9 +122,6 @@ export default function Index() {
         </s-section>
         <s-section heading="Prepaid Selected">
           <span style={{ fontSize: "24px", fontWeight: "bold" }}>{analytics.prepaid_orders}</span>
-        </s-section>
-        <s-section heading="Unverified / Dropped">
-          <span style={{ fontSize: "24px", fontWeight: "bold", color: "#d9534f" }}>{analytics.unverified_orders}</span>
         </s-section>
       </s-grid>
 

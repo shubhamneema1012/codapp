@@ -17,7 +17,9 @@ const defaultSettings = {
     changeNumberText: "Change Mobile Number",
     // Error Messages
     phoneErrorText: "Please enter a valid mobile number.",
-    otpErrorText: "The OTP you entered is incorrect."
+    otpErrorText: "The OTP you entered is incorrect.",
+    // Payment Customization
+    enableCodCustomization: false
   }
 };
 
@@ -56,7 +58,7 @@ export default function SettingsPage() {
           if (result.data.shop.metafield?.value) {
             try {
               let parsedValue = JSON.parse(result.data.shop.metafield.value);
-              
+
               // Graceful Migration: If old flat structure, wrap it under default_template
               if (!parsedValue.default_template) {
                 parsedValue = { default_template: parsedValue };
@@ -100,6 +102,167 @@ export default function SettingsPage() {
     }
   };
 
+  const syncPaymentCustomization = async (enable) => {
+    try {
+      // 1. Get deployed shopifyFunctions to find functionId
+      const functionResponse = await fetch("shopify:admin/api/graphql.json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `
+            query {
+              shopifyFunctions(first: 50) {
+                nodes {
+                  id
+                  title
+                  apiType
+                }
+              }
+            }
+          `
+        })
+      });
+      const functionResult = await functionResponse.json();
+      const functions = functionResult.data?.shopifyFunctions?.nodes || [];
+
+      const ourFunction = functions.find(fn =>
+        fn.apiType === "payment_customization" &&
+        (fn.title.toLowerCase().includes("payment-customization") || fn.title.toLowerCase().includes("payment customization"))
+      );
+
+      if (!ourFunction) {
+        console.warn("Codapp payment-customization function not found in deployed shopifyFunctions list.");
+        return;
+      }
+
+      const functionId = ourFunction.id;
+
+      // 2. Get active payment customizations
+      const customizationResponse = await fetch("shopify:admin/api/graphql.json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `
+            query {
+              paymentCustomizations(first: 50) {
+                nodes {
+                  id
+                  title
+                  enabled
+                }
+              }
+            }
+          `
+        })
+      });
+      const customizationResult = await customizationResponse.json();
+      const customizations = customizationResult.data?.paymentCustomizations?.nodes || [];
+
+      // Find our rule by title
+      const ourCustomization = customizations.find(cust =>
+        cust.title === "COD Mobile Verification (Codapp)"
+      );
+
+      if (enable) {
+        if (!ourCustomization) {
+          // If enabling and doesn't exist, create it
+          const createResponse = await fetch("shopify:admin/api/graphql.json", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: `
+                mutation paymentCustomizationCreate($input: PaymentCustomizationInput!) {
+                  paymentCustomizationCreate(paymentCustomization: $input) {
+                    paymentCustomization {
+                      id
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+              `,
+              variables: {
+                input: {
+                  title: "COD Mobile Verification (Codapp)",
+                  enabled: true,
+                  functionId: functionId
+                }
+              }
+            })
+          });
+          const createResult = await createResponse.json();
+          if (createResult.data?.paymentCustomizationCreate?.userErrors?.length > 0) {
+            console.error("Error creating payment customization:", createResult.data.paymentCustomizationCreate.userErrors);
+          } else {
+            console.log("Payment customization rule activated successfully!");
+          }
+        } else if (!ourCustomization.enabled) {
+          // If exists but disabled, enable it
+          await fetch("shopify:admin/api/graphql.json", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: `
+                mutation paymentCustomizationUpdate($id: ID!, $input: PaymentCustomizationInput!) {
+                  paymentCustomizationUpdate(id: $id, paymentCustomization: $input) {
+                    paymentCustomization {
+                      id
+                    }
+                    userErrors {
+                      message
+                    }
+                  }
+                }
+              `,
+              variables: {
+                id: ourCustomization.id,
+                input: {
+                  title: "COD Mobile Verification (Codapp)",
+                  enabled: true,
+                  functionId: functionId
+                }
+              }
+            })
+          });
+        }
+      } else {
+        // If disabling and rule exists, delete it
+        if (ourCustomization) {
+          const deleteResponse = await fetch("shopify:admin/api/graphql.json", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: `
+                mutation paymentCustomizationDelete($id: ID!) {
+                  paymentCustomizationDelete(id: $id) {
+                    deletedId
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+              `,
+              variables: {
+                id: ourCustomization.id
+              }
+            })
+          });
+          const deleteResult = await deleteResponse.json();
+          if (deleteResult.data?.paymentCustomizationDelete?.userErrors?.length > 0) {
+            console.error("Error deleting payment customization:", deleteResult.data.paymentCustomizationDelete.userErrors);
+          } else {
+            console.log("Payment customization rule removed successfully!");
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error synchronizing payment customization:", e);
+    }
+  };
+
   const handleSave = async () => {
     if (!shopId) {
       shopify.toast.show("Shop ID not found!");
@@ -108,6 +271,7 @@ export default function SettingsPage() {
 
     setIsSaving(true);
     try {
+      // 1. Save Metafield configuration
       const response = await fetch("shopify:admin/api/graphql.json", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -132,7 +296,7 @@ export default function SettingsPage() {
                 ownerId: shopId,
                 namespace: "codapp",
                 key: "widget_settings",
-                type: "json", 
+                type: "json",
                 value: JSON.stringify(formData)
               }
             ]
@@ -145,11 +309,17 @@ export default function SettingsPage() {
       if (result.data?.metafieldsSet?.userErrors?.length > 0) {
         console.error("Save errors:", result.data.metafieldsSet.userErrors);
         shopify.toast.show("Failed to save settings");
-      } else {
-        shopify.toast.show("Settings saved successfully!");
-        setInitialData(formData);
-        shopify.saveBar.hide("settings-save-bar");
+        setIsSaving(false);
+        return;
       }
+
+      // 2. Synchronize Shopify Payment Customization
+      const isEnabled = formData.default_template.enableCodCustomization;
+      await syncPaymentCustomization(isEnabled);
+
+      shopify.toast.show("Settings saved successfully!");
+      setInitialData(formData);
+      shopify.saveBar.hide("settings-save-bar");
     } catch (error) {
       console.error("Error saving metafield:", error);
       shopify.toast.show("Error saving data");
@@ -175,9 +345,9 @@ export default function SettingsPage() {
       <s-grid gap="base" gridTemplateColumns="1fr 1fr">
         <s-section heading="Widget Customization">
           <div style={{ padding: "16px", backgroundColor: "#f4f6f8", border: "1px solid #c9cccf", borderRadius: "8px", marginBottom: "20px" }}>
-            
+
             <h3 style={{ fontSize: "16px", fontWeight: "600", marginBottom: "12px", borderBottom: "1px solid #c9cccf", paddingBottom: "6px" }}>1. Content & Text</h3>
-            
+
             <div style={{ marginBottom: "16px" }}>
               <label style={{ display: "block", marginBottom: "4px", fontWeight: "600", color: "#202223" }}>Heading Text</label>
               <input
@@ -261,7 +431,7 @@ export default function SettingsPage() {
             </div>
 
             <h3 style={{ fontSize: "16px", fontWeight: "600", marginTop: "24px", marginBottom: "12px", borderBottom: "1px solid #c9cccf", paddingBottom: "6px" }}>3. Styles & Colors</h3>
-            
+
             <div style={{ marginBottom: "16px" }}>
               <label style={{ display: "block", marginBottom: "4px", fontWeight: "600", color: "#202223" }}>Background Color</label>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -333,18 +503,34 @@ export default function SettingsPage() {
                 />
               </div>
             </div>
+
+            <h3 style={{ fontSize: "16px", fontWeight: "600", marginTop: "24px", marginBottom: "12px", borderBottom: "1px solid #c9cccf", paddingBottom: "6px" }}>4. Checkout Rules</h3>
+
+            <div style={{ marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
+              <input
+                type="checkbox"
+                id="enableCodCustomization"
+                checked={tSettings.enableCodCustomization || false}
+                onChange={(e) => handleChange("enableCodCustomization", e.target.checked)}
+                style={{ width: "20px", height: "20px", cursor: "pointer" }}
+              />
+              <label htmlFor="enableCodCustomization" style={{ fontWeight: "600", color: "#202223", cursor: "pointer" }}>
+                Hide COD payment method until verified via OTP
+              </label>
+            </div>
+
           </div>
         </s-section>
 
         <s-section heading="Preview">
-          <div style={{ 
-            backgroundColor: tSettings.backgroundColor, 
-            padding: "24px", 
-            border: "1px solid #888", 
-            width: "100%", 
-            maxWidth: "400px", 
-            borderRadius: "8px", 
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)", 
+          <div style={{
+            backgroundColor: tSettings.backgroundColor,
+            padding: "24px",
+            border: "1px solid #888",
+            width: "100%",
+            maxWidth: "400px",
+            borderRadius: "8px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
             fontFamily: "sans-serif",
             margin: "0 auto",
             color: tSettings.textColor
@@ -352,34 +538,34 @@ export default function SettingsPage() {
             <h2 style={{ marginTop: "0", marginBottom: "8px", fontSize: "20px", fontWeight: "600", color: tSettings.textColor }}>
               {tSettings.headingText}
             </h2>
-            
+
             <p style={{ fontSize: "15px", color: tSettings.textColor, marginBottom: "16px", textAlign: "center" }}>
               How would you like to pay for your order?
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "16px" }}>
-              <button style={{ 
-                padding: "12px", 
-                backgroundColor: tSettings.buttonColor, 
-                color: tSettings.buttonTextColor, 
-                border: "none", 
-                borderRadius: "4px", 
-                fontSize: "16px", 
-                cursor: "pointer", 
-                width: "100%", 
-                fontWeight: "500" 
+              <button style={{
+                padding: "12px",
+                backgroundColor: tSettings.buttonColor,
+                color: tSettings.buttonTextColor,
+                border: "none",
+                borderRadius: "4px",
+                fontSize: "16px",
+                cursor: "pointer",
+                width: "100%",
+                fontWeight: "500"
               }}>
                 {tSettings.codButtonText}
               </button>
-              <button style={{ 
-                padding: "12px", 
-                backgroundColor: "transparent", 
-                color: tSettings.textColor, 
-                border: `1px solid ${tSettings.buttonColor}`, 
-                borderRadius: "4px", 
-                fontSize: "16px", 
-                cursor: "pointer", 
-                width: "100%", 
-                fontWeight: "500" 
+              <button style={{
+                padding: "12px",
+                backgroundColor: "transparent",
+                color: tSettings.textColor,
+                border: `1px solid ${tSettings.buttonColor}`,
+                borderRadius: "4px",
+                fontSize: "16px",
+                cursor: "pointer",
+                width: "100%",
+                fontWeight: "500"
               }}>
                 {tSettings.prepaidButtonText}
               </button>

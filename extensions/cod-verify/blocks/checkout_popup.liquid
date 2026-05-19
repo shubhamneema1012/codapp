@@ -102,6 +102,10 @@
     
     const auth = firebase.auth();
 
+    // TESTING CONFIGURATION (Set IS_TESTING to false for production)
+    const IS_TESTING = true; 
+    const TEST_OTP = "123456";
+
     // State variables
     modal.style.display = "none";
     let checkoutTarget = null;
@@ -111,6 +115,16 @@
     // Set up reCAPTCHA verifier
     let recaptchaVerifier = null;
     function initRecaptcha() {
+      const recaptchaContainer = document.getElementById('recaptcha-container');
+      if (IS_TESTING) {
+        if (recaptchaContainer) {
+          recaptchaContainer.style.display = 'none';
+        }
+        return;
+      }
+      if (recaptchaContainer) {
+        recaptchaContainer.style.display = 'block';
+      }
       if (!recaptchaVerifier) {
         recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptcha-container', {
           'size': 'normal',
@@ -205,7 +219,7 @@
       error2.style.display = "none";
       otpInput.value = "";
       
-      if (window.recaptchaWidgetId !== undefined && recaptchaVerifier) {
+      if (!IS_TESTING && window.recaptchaWidgetId !== undefined && recaptchaVerifier) {
          grecaptcha.reset(window.recaptchaWidgetId);
       }
     }
@@ -233,6 +247,20 @@
       const originalText = sendOtpBtn.textContent;
       sendOtpBtn.textContent = "Sending OTP...";
       sendOtpBtn.disabled = true;
+
+      if (IS_TESTING) {
+        // Mock sending OTP for testing
+        setTimeout(() => {
+          sendOtpBtn.textContent = originalText;
+          sendOtpBtn.disabled = false;
+          
+          displayMobile.textContent = mobileNumber;
+          step1.style.display = "none";
+          step2.style.display = "block";
+          console.log("[Testing] Mock OTP Sent to " + mobileNumber + ". Use hardcoded OTP: " + TEST_OTP);
+        }, 800);
+        return;
+      }
 
       auth.signInWithPhoneNumber(mobileNumber, recaptchaVerifier)
         .then((result) => {
@@ -274,6 +302,26 @@
         error2.style.display = "block";
         return;
       }
+
+      if (IS_TESTING) {
+        const originalText = verifyOtpBtn.textContent;
+        verifyOtpBtn.textContent = "Verifying...";
+        verifyOtpBtn.disabled = true;
+
+        setTimeout(() => {
+          if (otpValue === TEST_OTP) {
+            verifyOtpBtn.textContent = "Redirecting...";
+            proceedToCheckout(true);
+          } else {
+            verifyOtpBtn.textContent = originalText;
+            verifyOtpBtn.disabled = false;
+            error2.textContent = otpErrorText;
+            error2.style.display = "block";
+          }
+        }, 800);
+        return;
+      }
+
       if (!confirmationResult) {
         error2.textContent = "Session expired. Please request a new OTP.";
         error2.style.display = "block";
@@ -331,7 +379,19 @@
           sendAnalytics('verify').then(() => executeCheckout());
         });
       } else {
-        sendAnalytics('prepaid').then(() => executeCheckout());
+        // Clear Verified COD attribute to ensure COD is hidden on checkout
+        fetch(window.Shopify && window.Shopify.routes && window.Shopify.routes.root ? window.Shopify.routes.root + 'cart/update.js' : '/cart/update.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attributes: { 'Verified COD': '' } })
+        })
+        .then(() => {
+          sendAnalytics('prepaid').then(() => executeCheckout());
+        })
+        .catch((err) => {
+          console.error("Cart update failed", err);
+          sendAnalytics('prepaid').then(() => executeCheckout());
+        });
       }
     }
 

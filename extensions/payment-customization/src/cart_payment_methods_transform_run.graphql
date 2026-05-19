@@ -1,0 +1,11 @@
+query CartPaymentMethodsTransformRunInput {
+  cart {
+    attribute(key: "Verified COD") {
+      value
+    }
+  }
+  paymentMethods {
+    id
+    name
+  }
+}
